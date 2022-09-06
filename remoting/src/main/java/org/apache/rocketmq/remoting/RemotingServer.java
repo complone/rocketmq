@@ -17,6 +17,9 @@
 package org.apache.rocketmq.remoting;
 
 import io.netty.channel.Channel;
+
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.util.concurrent.ExecutorService;
 import org.apache.rocketmq.remoting.common.Pair;
 import org.apache.rocketmq.remoting.exception.RemotingSendRequestException;
@@ -29,6 +32,9 @@ public interface RemotingServer extends RemotingService {
 
     void registerProcessor(final int requestCode, final NettyRequestProcessor processor,
         final ExecutorService executor);
+    
+    void registerProcessorAndPort(final int requestCode, final NettyRequestProcessor processor,
+                                  final ExecutorService executor, final ServerSocket serverSocket) throws IOException;
 
     void registerDefaultProcessor(final NettyRequestProcessor processor, final ExecutorService executor);
 

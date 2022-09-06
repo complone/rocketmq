@@ -18,6 +18,8 @@
 package org.apache.rocketmq.test.autoswitchrole;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -25,6 +27,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableList;
+import io.netty.channel.ChannelHandlerContext;
 import org.apache.rocketmq.broker.BrokerController;
 import org.apache.rocketmq.broker.controller.ReplicasManager;
 import org.apache.rocketmq.common.UtilAll;
@@ -33,8 +36,14 @@ import org.apache.rocketmq.common.namesrv.NamesrvConfig;
 import org.apache.rocketmq.common.protocol.body.SyncStateSet;
 import org.apache.rocketmq.controller.ControllerManager;
 import org.apache.rocketmq.namesrv.NamesrvController;
+import org.apache.rocketmq.remoting.RemotingClient;
+import org.apache.rocketmq.remoting.RemotingServer;
 import org.apache.rocketmq.remoting.netty.NettyClientConfig;
+import org.apache.rocketmq.remoting.netty.NettyRemotingClient;
+import org.apache.rocketmq.remoting.netty.NettyRemotingServer;
+import org.apache.rocketmq.remoting.netty.NettyRequestProcessor;
 import org.apache.rocketmq.remoting.netty.NettyServerConfig;
+import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 import org.apache.rocketmq.store.MappedFileQueue;
 import org.apache.rocketmq.store.MessageStore;
 import org.apache.rocketmq.store.config.BrokerRole;
@@ -42,8 +51,7 @@ import org.apache.rocketmq.store.ha.HAClient;
 import org.apache.rocketmq.store.ha.HAConnectionState;
 import org.apache.rocketmq.store.ha.autoswitch.AutoSwitchHAService;
 import org.apache.rocketmq.store.logfile.MappedFile;
-import org.apache.rocketmq.test.base.BaseConf;
-import org.junit.After;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.awaitility.Awaitility.await;
@@ -62,7 +70,33 @@ public class AutoSwitchRoleIntegrationTest extends AutoSwitchRoleBase {
     private BrokerController brokerController1;
     private BrokerController brokerController2;
     protected List<BrokerController> brokerControllerList;
+    protected static RemotingServer remotingServer1;
+    protected static RemotingServer remotingServer2;
     
+    public static RemotingServer createRemotingServer() throws InterruptedException, IOException {
+        NettyServerConfig config = new NettyServerConfig();
+        RemotingServer remotingServer = new NettyRemotingServer(config);
+        remotingServer.registerProcessorAndPort(0, new NettyRequestProcessor() {
+            @Override
+            public RemotingCommand processRequest(ChannelHandlerContext ctx, RemotingCommand request) throws Exception {
+                request.setRemark("Hi " + ctx.channel().remoteAddress());
+                return request;
+            }
+    
+            @Override
+            public boolean rejectRequest() {
+                return false;
+            }
+        }, Executors.newCachedThreadPool(), new ServerSocket(0));
+        remotingServer.start();
+        return remotingServer;
+    }
+    
+    @BeforeClass
+    public static void setUp() throws InterruptedException, IOException {
+        remotingServer1 = createRemotingServer();
+        remotingServer2 = createRemotingServer();
+    }
     
     public void init(int mappedFileSize) throws Exception {
         super.initialize();
@@ -87,8 +121,8 @@ public class AutoSwitchRoleIntegrationTest extends AutoSwitchRoleBase {
         this.namesrvAddress = "127.0.0.1:" + namesrvPort + ";";
         this.controllerAddress = "127.0.0.1:" + controllerPort + ";";
 
-        this.brokerController1 = startBroker(this.namesrvAddress, this.controllerAddress, 1, nextPort(), nextPort(), nextPort(), BrokerRole.SYNC_MASTER, mappedFileSize);
-        this.brokerController2 = startBroker(this.namesrvAddress, this.controllerAddress, 2, nextPort(), nextPort(), nextPort(), BrokerRole.SLAVE, mappedFileSize);
+        this.brokerController1 = startBroker(this.namesrvAddress, this.controllerAddress, 1, nextPort(), nextPort(), remotingServer1.localListenPort(), BrokerRole.SYNC_MASTER, mappedFileSize);
+        this.brokerController2 = startBroker(this.namesrvAddress, this.controllerAddress, 2, nextPort(), nextPort(), remotingServer2.localListenPort(), BrokerRole.SLAVE, mappedFileSize);
         this.brokerControllerList = ImmutableList.of(brokerController1, brokerController2);
     
     
@@ -255,6 +289,11 @@ public class AutoSwitchRoleIntegrationTest extends AutoSwitchRoleBase {
         if (this.namesrvController != null) {
             this.namesrvController.shutdown();
         }
+        
+        brokerController1.shutdown();
+        brokerController2.shutdown();
+        
+        
         super.destroy();
     }
     

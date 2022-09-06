@@ -41,6 +41,7 @@ import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.security.cert.CertificateException;
 import java.util.NoSuchElementException;
 import java.util.Timer;
@@ -84,7 +85,9 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
      * ListenPort key.
      */
     private ConcurrentMap<Integer/*Port*/, NettyRemotingAbstract> remotingServerTable = new ConcurrentHashMap<Integer, NettyRemotingAbstract>();
-
+    private ConcurrentMap<Integer/*Port*/, ServerSocket> remotingServerSocket = new ConcurrentHashMap<Integer, ServerSocket>();
+    
+    
     private static final String HANDSHAKE_HANDLER_NAME = "handshakeHandler";
     private static final String TLS_HANDLER_NAME = "sslHandler";
     private static final String FILE_REGION_ENCODER_NAME = "fileRegionEncoder";
@@ -312,7 +315,22 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
         Pair<NettyRequestProcessor, ExecutorService> pair = new Pair<NettyRequestProcessor, ExecutorService>(processor, executorThis);
         this.processorTable.put(requestCode, pair);
     }
-
+    
+    @Override
+    public void registerProcessorAndPort(int requestCode, NettyRequestProcessor processor, ExecutorService executor, ServerSocket serverSocket) throws IOException {
+        registerProcessor(requestCode,processor,executor);
+        if (null == serverSocket){
+            serverSocket = new ServerSocket(0);
+            remotingServerSocket.put(serverSocket.getLocalPort(), serverSocket);
+        }
+    
+        if(remotingServerSocket.size() != 0 && this.nettyServerConfig.getListenPort() == 0) {
+            int nettyServerPort = remotingServerSocket.get(0).getLocalPort();
+            this.nettyServerConfig.setListenPort(nettyServerPort);
+        }
+        remotingServerSocket.clear();
+    }
+    
     @Override
     public void registerDefaultProcessor(NettyRequestProcessor processor, ExecutorService executor) {
         this.defaultRequestProcessor = new Pair<NettyRequestProcessor, ExecutorService>(processor, executor);
@@ -559,7 +577,13 @@ public class NettyRemotingServer extends NettyRemotingAbstract implements Remoti
             Pair<NettyRequestProcessor, ExecutorService> pair = new Pair<NettyRequestProcessor, ExecutorService>(processor, executorThis);
             this.processorTable.put(requestCode, pair);
         }
-
+    
+    
+        @Override
+        public void registerProcessorAndPort(int requestCode, NettyRequestProcessor processor, ExecutorService executor, ServerSocket serverSocket) throws IOException {
+        
+        }
+    
         @Override
         public void registerDefaultProcessor(final NettyRequestProcessor processor, final ExecutorService executor) {
             this.defaultRequestProcessor = new Pair<NettyRequestProcessor, ExecutorService>(processor, executor);
