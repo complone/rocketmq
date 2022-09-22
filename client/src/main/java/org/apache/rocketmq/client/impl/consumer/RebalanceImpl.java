@@ -300,7 +300,14 @@ public abstract class RebalanceImpl {
     public ConcurrentMap<String, SubscriptionData> getSubscriptionInner() {
         return subscriptionInner;
     }
-
+    
+    /**
+     * 这里会针对DefaultMQPullConsumer设置的广播模式和集群模式
+     * 的配置信息做重平衡的策略
+     * @param topic
+     * @param isOrder
+     * @return
+     */
     private boolean rebalanceByTopic(final String topic, final boolean isOrder) {
         boolean balanced = true;
         switch (messageModel) {
