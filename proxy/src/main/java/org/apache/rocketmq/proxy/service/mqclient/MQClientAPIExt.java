@@ -179,6 +179,7 @@ public class MQClientAPIExt extends MQClientAPIImpl {
                 RemotingCommand response = responseFuture.getResponseCommand();
                 if (response != null) {
                     try {
+                        // 主从同步刷新失败，刷新延迟
                         future.complete(this.processSendResponse(brokerName, msg, response, brokerAddr));
                     } catch (Exception e) {
                         future.completeExceptionally(e);

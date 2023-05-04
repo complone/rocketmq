@@ -34,6 +34,16 @@ public abstract class AbstractTransactionService implements TransactionService, 
         return this.addTransactionDataByBrokerName(this.getBrokerNameByAddr(brokerAddr), producerGroup, tranStateTableOffset, commitLogOffset, transactionId, message);
     }
 
+    /**
+     * 添加事务结束标志
+     * @param brokerName broker机器名
+     * @param producerGroup 生产者组
+     * @param tranStateTableOffset 记录结束事务当前的offset标志位置
+     * @param commitLogOffset 消费消息的最后一一个位置
+     * @param transactionId 本次事务提交的标志id
+     * @param message rocketmq自身的消息协议
+     * @return
+     */
     @Override
     public TransactionData addTransactionDataByBrokerName(String brokerName, String producerGroup, long tranStateTableOffset, long commitLogOffset, String transactionId,
         Message message) {

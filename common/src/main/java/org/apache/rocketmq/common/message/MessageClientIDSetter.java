@@ -30,6 +30,10 @@ public class MessageClientIDSetter {
     private static long startTime;
     private static long nextStartTime;
 
+    /**
+     * protocol format
+     * FIX_STRING: ipLength + 2 + 4 + Jvm pid + ClientIDSetter#hasCode
+     */
     static {
         byte[] ip;
         try {
@@ -47,6 +51,10 @@ public class MessageClientIDSetter {
         COUNTER = new AtomicInteger(0);
     }
 
+    /**
+     * 默认时钟 每个月的2月1号
+     * @param millis
+     */
     private synchronized static void setStartTime(long millis) {
         Calendar cal = Calendar.getInstance();
         cal.setTimeInMillis(millis);
@@ -111,6 +119,13 @@ public class MessageClientIDSetter {
         return value & 0x0000FFFF;
     }
 
+    /**
+     * FIX_STRING: ipLength + 2 + 4 + Jvm pid + ClientIDSetter#hasCode
+     * ipLength + 2 + 4 + Jvm pid + ClientIDSetter#hasCode +  current - startTime + 8bytes + messageNo
+     *
+     * 如果proxy和broker分别在不同机器上 可能会没有做时钟同步
+     * @return
+     */
     public static String createUniqID() {
         char[] sb = new char[LEN * 2];
         System.arraycopy(FIX_STRING, 0, sb, 0, FIX_STRING.length);

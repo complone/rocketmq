@@ -85,11 +85,14 @@ public class ProducerProcessor extends AbstractProcessor {
                 throw new ProxyException(ProxyExceptionCode.FORBIDDEN, "no writable queue");
             }
 
+            //设置消息的UID
+            //格式: ipLength + 2 + 4 + Jvm pid + ClientIDSetter#hasCode +  current - startTime + 8bytes + messageNo
             for (Message msg : messageList) {
                 MessageClientIDSetter.setUniqID(msg);
             }
             SendMessageRequestHeader requestHeader = buildSendMessageRequestHeader(messageList, producerGroup, sysFlag, messageQueue.getQueueId());
 
+            //发送消息的场景 分为本地消息服务和集群消息服务
             future = this.serviceManager.getMessageService().sendMessage(
                 ctx,
                 messageQueue,
@@ -113,6 +116,13 @@ public class ProducerProcessor extends AbstractProcessor {
         return FutureUtils.addExecutor(future, this.executor);
     }
 
+    /**
+     * TransactionData
+     * @param producerGroup
+     * @param messageQueue
+     * @param sendResult
+     * @param messageList
+     */
     protected void fillTransactionData(String producerGroup, AddressableMessageQueue messageQueue, SendResult sendResult, List<Message> messageList) {
         try {
             MessageId id;

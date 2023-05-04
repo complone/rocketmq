@@ -20,12 +20,20 @@ import com.alibaba.fastjson.JSON;
 import org.apache.rocketmq.common.message.MessageQueue;
 
 public class SendResult {
+    //表示开启主从同步后的同步状态: 1.刷写到磁盘 2.从主到从 是否存在刷新延迟 3.从主到从存在刷新失败
     private SendStatus sendStatus;
+    // Message中的id字段
     private String msgId;
+    //递送消息所归属的分区
     private MessageQueue messageQueue;
+    // queueOffset 每个queue的offset
     private long queueOffset;
+    //事务消息的本次提交事务ID
     private String transactionId;
+    //MessageDecoder#createMessageId
+    // 代表每次创建消息所归属的消息ip+port+transcationId的hashcode
     private String offsetMsgId;
+    //可用区id
     private String regionId;
     private boolean traceOn = true;
     private byte[] rawRespBody;

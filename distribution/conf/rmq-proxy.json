@@ -1,3 +1,4 @@
 {
-  "rocketMQClusterName": "DefaultCluster"
+  "rocketMQClusterName": "DefaultCluster",
+  "namesrvAddr": "localhost:9876"
 }

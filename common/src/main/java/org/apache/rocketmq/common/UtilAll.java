@@ -69,6 +69,7 @@ public class UtilAll {
         HEX_ARRAY = "0123456789ABCDEF".toCharArray();
         Supplier<Integer> supplier = () -> {
             // format: "pid@hostname"
+            //获取当前jvm进程的PID
             String currentJVM = ManagementFactory.getRuntimeMXBean().getName();
             try {
                 return Integer.parseInt(currentJVM.substring(0, currentJVM.indexOf('@')));
