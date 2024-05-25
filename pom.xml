@@ -196,6 +196,7 @@
         <module>controller</module>
         <module>proxy</module>
         <module>tieredstore</module>
+        <module>rocketmq- Idempotent</module>
     </modules>
 
     <build>

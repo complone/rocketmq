@@ -126,4 +126,12 @@ public class ResponseCode extends RemotingSysResponseCode {
     public static final int CONTROLLER_ALTER_SYNC_STATE_SET_FAILED = 2013;
 
     public static final int CONTROLLER_BROKER_ID_INVALID = 2014;
+
+    public static final int CREATE_JUST = 2015;
+
+    public static final int SHUTDOWN_ALREADY = 2016;
+
+    public static final int START_FAILED = 2017;
+
+    public static final int NO_PROXY = 2018;
 }

@@ -29,6 +29,10 @@ public class SendResult {
     private String regionId;
     private boolean traceOn = true;
     private byte[] rawRespBody;
+    private String messageId;
+    private String topic;
+
+
 
     public SendResult() {
     }
@@ -60,6 +64,22 @@ public class SendResult {
 
     public static SendResult decoderSendResultFromJson(String json) {
         return JSON.parseObject(json, SendResult.class);
+    }
+
+    public void setMessageId(String messageId) {
+        this.messageId = messageId;
+    }
+
+    public String getMessageId() {
+        return this.messageId;
+    }
+
+    public String getTopic() {
+        return this.topic;
+    }
+
+    public void setTopic(String topic) {
+        this.topic = topic;
     }
 
     public boolean isTraceOn() {

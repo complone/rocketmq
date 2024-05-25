@@ -76,6 +76,8 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         ResponseCode.NO_BUYER_ID,
         ResponseCode.NOT_IN_CURRENT_UNIT
     ));
+    private String proxyAddr;
+
 
     /**
      * Producer group conceptually aggregates all producer instances of exactly same role, which is particularly
@@ -288,6 +290,14 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
                 logger.error("system mqtrace hook init failed ,maybe can't send msg trace data");
             }
         }
+    }
+
+    public String getProxyAddr() {
+        return proxyAddr;
+    }
+
+    public void setProxyAddr(String proxyAddr) {
+        this.proxyAddr = proxyAddr;
     }
 
     @Override
