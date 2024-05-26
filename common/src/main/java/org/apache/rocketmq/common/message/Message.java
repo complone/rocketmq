@@ -17,19 +17,29 @@
 package org.apache.rocketmq.common.message;
 
 import java.io.Serializable;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 public class Message implements Serializable {
     private static final long serialVersionUID = 8445773977080406428L;
 
     private String topic;
+    Properties systemProperties;
     private int flag;
     private Map<String, String> properties;
+    private Properties userProperties;
     private byte[] body;
     private String transactionId;
+
+    public static class SystemPropKey {
+        public static final String TAG = "__TAG";
+        public static final String KEY = "__KEY";
+        public static final String MSGID = "__MSGID";
+        public static final String SHARDINGKEY = "__SHARDINGKEY";
+        public static final String RECONSUMETIMES = "__RECONSUMETIMES";
+        public static final String BORNTIMESTAMP = "__BORNTIMESTAMP";
+        public static final String BORNHOST = "__BORNHOST";
+        public static final String STARTDELIVERTIME = "__STARTDELIVERTIME";
+    }
 
     public Message() {
     }
@@ -96,6 +106,15 @@ public class Message implements Serializable {
         this.putProperty(name, value);
     }
 
+    public void putUserProperties(String key, String value) {
+        if (null == this.userProperties) {
+            this.userProperties = new Properties();
+        }
+        if (key != null && value != null) {
+            this.userProperties.put(key, value);
+        }
+    }
+
     public String getUserProperty(final String name) {
         return this.getProperty(name);
     }
@@ -106,6 +125,27 @@ public class Message implements Serializable {
         }
 
         return this.properties.get(name);
+    }
+
+    public void setTag(String tag) {
+        putSystemProperties(SystemPropKey.TAG, tag);
+    }
+
+
+    public String getKey() {
+        return getSystemProperties(SystemPropKey.KEY);
+    }
+
+    public void setKey(String key) {
+        putSystemProperties(SystemPropKey.KEY, key);
+    }
+
+    public String getMsgID() {
+        return getSystemProperties(SystemPropKey.MSGID);
+    }
+
+    public void setMsgID(String msgid) {
+        putSystemProperties(SystemPropKey.MSGID, msgid);
     }
 
     public String getTopic() {
@@ -126,6 +166,64 @@ public class Message implements Serializable {
 
     public String getKeys() {
         return this.getProperty(MessageConst.PROPERTY_KEYS);
+    }
+
+    public String getTag() {
+        return getSystemProperties(SystemPropKey.TAG);
+    }
+
+    public String getShardingKey() {
+        String pro = getSystemProperties(SystemPropKey.SHARDINGKEY);
+        return pro == null ? "" : pro;
+    }
+
+    public String getSystemProperties(String key) {
+        if (null != this.systemProperties) {
+            return this.systemProperties.getProperty(key);
+        }
+        return null;
+    }
+
+    public void putSystemProperties(String key, String value) {
+        if (null == this.systemProperties) {
+            this.systemProperties = new Properties();
+        }
+        if (key != null && value != null) {
+            this.systemProperties.put(key, value);
+        }
+    }
+
+    public void setReconsumeTimes(int value) {
+        putSystemProperties(SystemPropKey.RECONSUMETIMES, String.valueOf(value));
+    }
+
+    public long getStartDeliverTime() {
+        String pro = getSystemProperties(SystemPropKey.STARTDELIVERTIME);
+        if (pro != null) {
+            return Long.parseLong(pro);
+        }
+        return 0;
+    }
+
+    public long getBornTimestamp() {
+        String pro = getSystemProperties(SystemPropKey.BORNTIMESTAMP);
+        if (pro != null) {
+            return Long.parseLong(pro);
+        }
+        return 0;
+    }
+
+    public void setBornTimestamp(long value) {
+        putSystemProperties(SystemPropKey.BORNTIMESTAMP, String.valueOf(value));
+    }
+
+    public String getBornHost() {
+        String pro = getSystemProperties(SystemPropKey.BORNHOST);
+        return pro == null ? "" : pro;
+    }
+
+    public void setBornHost(String value) {
+        putSystemProperties(SystemPropKey.BORNHOST, value);
     }
 
     public void setKeys(Collection<String> keyCollection) {

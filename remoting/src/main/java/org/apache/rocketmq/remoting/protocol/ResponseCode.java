@@ -134,4 +134,12 @@ public class ResponseCode extends RemotingSysResponseCode {
     public static final int USER_NOT_EXIST = 3001;
 
     public static final int POLICY_NOT_EXIST = 3002;
+
+    public static final int CREATE_JUST = 2015;
+
+    public static final int SHUTDOWN_ALREADY = 2016;
+
+    public static final int START_FAILED = 2017;
+
+    public static final int NO_PROXY = 2018;
 }

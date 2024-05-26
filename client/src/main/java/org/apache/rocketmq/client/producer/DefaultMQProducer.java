@@ -80,6 +80,8 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         ResponseCode.NO_BUYER_ID,
         ResponseCode.NOT_IN_CURRENT_UNIT
     ));
+    private String proxyAddr;
+
 
     /**
      * Producer group conceptually aggregates all producer instances of exactly same role, which is particularly
@@ -314,6 +316,28 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     }
 
     /**
+     * Constructor specifying producer group and enabled msg trace flag.
+     *
+     * @param producerGroup  Producer group, see the name-sake field.
+     * @param enableMsgTrace Switch flag instance for message trace.
+     */
+    public DefaultMQProducer(final String producerGroup, boolean enableMsgTrace) {
+        this(null, producerGroup, null, enableMsgTrace, null);
+    }
+
+    /**
+     * Constructor specifying producer group, enabled msgTrace flag and customized trace topic name.
+     *
+     * @param producerGroup        Producer group, see the name-sake field.
+     * @param enableMsgTrace       Switch flag instance for message trace.
+     * @param customizedTraceTopic The name value of message trace topic.If you don't config,you can use the default
+     *                             trace topic name.
+     */
+    public DefaultMQProducer(final String producerGroup, boolean enableMsgTrace, final String customizedTraceTopic) {
+        this(null, producerGroup, null, enableMsgTrace, customizedTraceTopic);
+    }
+
+    /**
      * Constructor specifying namespace, producer group, RPC hook, enabled msgTrace flag and customized trace topic
      * name.
      *
@@ -329,6 +353,24 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         boolean enableMsgTrace, final String customizedTraceTopic) {
         this(namespace, producerGroup, rpcHook);
         //if client open the message trace feature
+        this.enableMsgTrace = enableMsgTrace;
+        this.traceTopic = customizedTraceTopic;
+    }
+
+    public String getProxyAddr() {
+        return proxyAddr;
+    }
+
+    public void setProxyAddr(String proxyAddr) {
+        this.proxyAddr = proxyAddr;
+    }
+
+    @Override
+    public void setUseTLS(boolean useTLS) {
+        super.setUseTLS(useTLS);
+        if (traceDispatcher instanceof AsyncTraceDispatcher) {
+            ((AsyncTraceDispatcher) traceDispatcher).getTraceProducer().setUseTLS(useTLS);
+        }
         this.enableTrace = enableMsgTrace;
         this.traceTopic = customizedTraceTopic;
     }
