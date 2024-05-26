@@ -62,13 +62,13 @@ import org.apache.rocketmq.common.message.MessageClientExt;
 import org.apache.rocketmq.common.message.MessageDecoder;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageQueue;
-import org.apache.rocketmq.common.protocol.header.PullMessageRequestHeader;
-import org.apache.rocketmq.common.protocol.route.BrokerData;
-import org.apache.rocketmq.common.protocol.route.QueueData;
-import org.apache.rocketmq.common.protocol.route.TopicRouteData;
 import org.apache.rocketmq.common.topic.TopicValidator;
 import org.apache.rocketmq.remoting.RPCHook;
 import org.apache.rocketmq.remoting.exception.RemotingException;
+import org.apache.rocketmq.remoting.protocol.header.PullMessageRequestHeader;
+import org.apache.rocketmq.remoting.protocol.route.BrokerData;
+import org.apache.rocketmq.remoting.protocol.route.QueueData;
+import org.apache.rocketmq.remoting.protocol.route.TopicRouteData;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -128,10 +128,8 @@ public class DefaultMQConsumerWithTraceTest {
         normalPushConsumer = new DefaultMQPushConsumer(consumerGroupNormal, false, "");
         customTraceTopicPushConsumer = new DefaultMQPushConsumer(consumerGroup, true, customerTraceTopic);
         pushConsumer.setNamesrvAddr("127.0.0.1:9876");
+        pushConsumer.setUseTLS(true);
         pushConsumer.setPullInterval(60 * 1000);
-
-        asyncTraceDispatcher = (AsyncTraceDispatcher) pushConsumer.getTraceDispatcher();
-        traceProducer = asyncTraceDispatcher.getTraceProducer();
 
         pushConsumer.registerMessageListener(new MessageListenerConcurrently() {
             @Override
@@ -156,6 +154,9 @@ public class DefaultMQConsumerWithTraceTest {
         pushConsumer.subscribe(topic, "*");
 
         pushConsumer.start();
+
+        asyncTraceDispatcher = (AsyncTraceDispatcher) pushConsumer.getTraceDispatcher();
+        traceProducer = asyncTraceDispatcher.getTraceProducer();
 
         mQClientFactory = spy(pushConsumerImpl.getmQClientFactory());
         mQClientTraceFactory = spy(pushConsumerImpl.getmQClientFactory());
@@ -239,12 +240,9 @@ public class DefaultMQConsumerWithTraceTest {
         assertThat(msg.getTopic()).isEqualTo(topic);
         assertThat(msg.getBody()).isEqualTo(new byte[] {'a'});
     }
-    
+
     @Test
     public void testPushConsumerWithTraceTLS() {
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("consumerGroup", true);
-        consumer.setUseTLS(true);
-        AsyncTraceDispatcher asyncTraceDispatcher = (AsyncTraceDispatcher) consumer.getTraceDispatcher();
         Assert.assertTrue(asyncTraceDispatcher.getTraceProducer().isUseTLS());
     }
 

@@ -29,14 +29,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
 import org.apache.rocketmq.client.AccessChannel;
 import org.apache.rocketmq.client.common.ThreadLocalIndex;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.impl.consumer.DefaultMQPushConsumerImpl;
 import org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl;
 import org.apache.rocketmq.client.impl.producer.TopicPublishInfo;
-import org.apache.rocketmq.client.log.ClientLogger;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.MessageQueueSelector;
 import org.apache.rocketmq.client.producer.SendCallback;
@@ -46,15 +44,16 @@ import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.common.topic.TopicValidator;
-import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.remoting.RPCHook;
+import org.apache.rocketmq.logging.org.slf4j.Logger;
+import org.apache.rocketmq.logging.org.slf4j.LoggerFactory;
 
 import static org.apache.rocketmq.client.trace.TraceConstants.TRACE_INSTANCE_NAME;
 
 public class AsyncTraceDispatcher implements TraceDispatcher {
-
-    private final static InternalLogger log = ClientLogger.getLog();
+    private final static Logger log = LoggerFactory.getLogger(AsyncTraceDispatcher.class);
     private final static AtomicInteger COUNTER = new AtomicInteger();
+    private final static short MAX_MSG_KEY_SIZE = Short.MAX_VALUE - 10000;
     private final int queueSize;
     private final int batchSize;
     private final int maxMsgSize;
@@ -79,6 +78,7 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
     private volatile AccessChannel accessChannel = AccessChannel.LOCAL;
     private String group;
     private Type type;
+    private String namespaceV2;
 
     public AsyncTraceDispatcher(String group, Type type, String traceTopicName, RPCHook rpcHook) {
         // queueSize is greater than or equal to the n power of 2 of value
@@ -145,10 +145,21 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
         this.hostConsumer = hostConsumer;
     }
 
+    public String getNamespaceV2() {
+        return namespaceV2;
+    }
+
+    public void setNamespaceV2(String namespaceV2) {
+        this.namespaceV2 = namespaceV2;
+    }
+
+    @Override
     public void start(String nameSrvAddr, AccessChannel accessChannel) throws MQClientException {
         if (isStarted.compareAndSet(false, true)) {
             traceProducer.setNamesrvAddr(nameSrvAddr);
             traceProducer.setInstanceName(TRACE_INSTANCE_NAME + "_" + nameSrvAddr);
+            traceProducer.setNamespaceV2(namespaceV2);
+            traceProducer.setEnableTrace(false);
             traceProducer.start();
         }
         this.accessChannel = accessChannel;
@@ -317,9 +328,10 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
     class TraceDataSegment {
         private long firstBeanAddTime;
         private int currentMsgSize;
+        private int currentMsgKeySize;
         private final String traceTopicName;
         private final String regionId;
-        private final List<TraceTransferBean> traceTransferBeanList = new ArrayList();
+        private final List<TraceTransferBean> traceTransferBeanList = new ArrayList<>();
 
         TraceDataSegment(String traceTopicName, String regionId) {
             this.traceTopicName = traceTopicName;
@@ -330,13 +342,14 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
             initFirstBeanAddTime();
             this.traceTransferBeanList.add(traceTransferBean);
             this.currentMsgSize += traceTransferBean.getTransData().length();
-            if (currentMsgSize >= traceProducer.getMaxMessageSize() - 10 * 1000) {
-                List<TraceTransferBean> dataToSend = new ArrayList(traceTransferBeanList);
+
+            this.currentMsgKeySize = traceTransferBean.getTransKey().stream()
+                .reduce(currentMsgKeySize, (acc, x) -> acc + x.length(), Integer::sum);
+            if (currentMsgSize >= traceProducer.getMaxMessageSize() - 10 * 1000 || currentMsgKeySize >= MAX_MSG_KEY_SIZE) {
+                List<TraceTransferBean> dataToSend = new ArrayList<>(traceTransferBeanList);
                 AsyncDataSendTask asyncDataSendTask = new AsyncDataSendTask(traceTopicName, regionId, dataToSend);
                 traceExecutor.submit(asyncDataSendTask);
-
                 this.clear();
-
             }
         }
 
@@ -344,7 +357,7 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
             if (this.traceTransferBeanList.isEmpty()) {
                 return;
             }
-            List<TraceTransferBean> dataToSend = new ArrayList(traceTransferBeanList);
+            List<TraceTransferBean> dataToSend = new ArrayList<>(traceTransferBeanList);
             AsyncDataSendTask asyncDataSendTask = new AsyncDataSendTask(traceTopicName, regionId, dataToSend);
             traceExecutor.submit(asyncDataSendTask);
 
@@ -360,10 +373,10 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
         private void clear() {
             this.firstBeanAddTime = 0;
             this.currentMsgSize = 0;
+            this.currentMsgKeySize = 0;
             this.traceTransferBeanList.clear();
         }
     }
-
 
     class AsyncDataSendTask implements Runnable {
         private final String traceTopicName;

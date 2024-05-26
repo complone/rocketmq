@@ -38,6 +38,9 @@ public class NettyServerConfig implements Cloneable {
     private int serverSocketBacklog = NettySystemConfig.socketBacklog;
     private boolean serverPooledByteBufAllocatorEnable = true;
 
+    private boolean enableShutdownGracefully = false;
+    private int shutdownWaitTimeSeconds = 30;
+
     /**
      * make install
      *
@@ -153,7 +156,7 @@ public class NettyServerConfig implements Cloneable {
 
     @Override
     public Object clone() throws CloneNotSupportedException {
-        return (NettyServerConfig) super.clone();
+        return super.clone();
     }
 
     public int getWriteBufferLowWaterMark() {
@@ -170,5 +173,21 @@ public class NettyServerConfig implements Cloneable {
 
     public void setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
         this.writeBufferHighWaterMark = writeBufferHighWaterMark;
+    }
+
+    public boolean isEnableShutdownGracefully() {
+        return enableShutdownGracefully;
+    }
+
+    public void setEnableShutdownGracefully(boolean enableShutdownGracefully) {
+        this.enableShutdownGracefully = enableShutdownGracefully;
+    }
+
+    public int getShutdownWaitTimeSeconds() {
+        return shutdownWaitTimeSeconds;
+    }
+
+    public void setShutdownWaitTimeSeconds(int shutdownWaitTimeSeconds) {
+        this.shutdownWaitTimeSeconds = shutdownWaitTimeSeconds;
     }
 }

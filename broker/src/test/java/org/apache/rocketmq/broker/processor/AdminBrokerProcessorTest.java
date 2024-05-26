@@ -20,53 +20,91 @@ import com.alibaba.fastjson.JSON;
 import com.google.common.collect.Sets;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
+import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.LongAdder;
+import org.apache.rocketmq.auth.authentication.enums.UserType;
+import org.apache.rocketmq.auth.authentication.manager.AuthenticationMetadataManager;
+import org.apache.rocketmq.auth.authentication.model.Subject;
+import org.apache.rocketmq.auth.authentication.model.User;
+import org.apache.rocketmq.auth.authorization.enums.Decision;
+import org.apache.rocketmq.auth.authorization.manager.AuthorizationMetadataManager;
+import org.apache.rocketmq.auth.authorization.model.Acl;
+import org.apache.rocketmq.auth.authorization.model.Environment;
+import org.apache.rocketmq.auth.authorization.model.Resource;
 import org.apache.rocketmq.broker.BrokerController;
 import org.apache.rocketmq.broker.client.ConsumerGroupInfo;
 import org.apache.rocketmq.broker.client.ConsumerManager;
 import org.apache.rocketmq.broker.offset.ConsumerOffsetManager;
 import org.apache.rocketmq.broker.schedule.ScheduleMessageService;
+import org.apache.rocketmq.broker.subscription.RocksDBSubscriptionGroupManager;
+import org.apache.rocketmq.broker.topic.RocksDBTopicConfigManager;
 import org.apache.rocketmq.broker.topic.TopicConfigManager;
+import org.apache.rocketmq.common.BoundaryType;
 import org.apache.rocketmq.common.BrokerConfig;
+import org.apache.rocketmq.common.KeyBuilder;
 import org.apache.rocketmq.common.MixAll;
 import org.apache.rocketmq.common.TopicConfig;
 import org.apache.rocketmq.common.TopicFilterType;
 import org.apache.rocketmq.common.TopicQueueId;
+import org.apache.rocketmq.common.action.Action;
 import org.apache.rocketmq.common.constant.PermName;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageAccessor;
 import org.apache.rocketmq.common.message.MessageConst;
 import org.apache.rocketmq.common.message.MessageExt;
-import org.apache.rocketmq.common.protocol.RequestCode;
-import org.apache.rocketmq.common.protocol.ResponseCode;
-import org.apache.rocketmq.common.protocol.body.LockBatchRequestBody;
-import org.apache.rocketmq.common.protocol.body.UnlockBatchRequestBody;
-import org.apache.rocketmq.common.protocol.header.CreateTopicRequestHeader;
-import org.apache.rocketmq.common.protocol.header.DeleteTopicRequestHeader;
-import org.apache.rocketmq.common.protocol.header.GetAllTopicConfigResponseHeader;
-import org.apache.rocketmq.common.protocol.header.GetEarliestMsgStoretimeRequestHeader;
-import org.apache.rocketmq.common.protocol.header.GetMaxOffsetRequestHeader;
-import org.apache.rocketmq.common.protocol.header.GetMinOffsetRequestHeader;
-import org.apache.rocketmq.common.protocol.header.GetTopicConfigRequestHeader;
-import org.apache.rocketmq.common.protocol.header.ResumeCheckHalfMessageRequestHeader;
-import org.apache.rocketmq.common.protocol.header.SearchOffsetRequestHeader;
-import org.apache.rocketmq.common.protocol.heartbeat.ConsumeType;
-import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
-import org.apache.rocketmq.common.subscription.SubscriptionGroupConfig;
 import org.apache.rocketmq.common.topic.TopicValidator;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 import org.apache.rocketmq.remoting.netty.NettyClientConfig;
 import org.apache.rocketmq.remoting.netty.NettyServerConfig;
 import org.apache.rocketmq.remoting.protocol.RemotingCommand;
+import org.apache.rocketmq.remoting.protocol.RequestCode;
+import org.apache.rocketmq.remoting.protocol.ResponseCode;
+import org.apache.rocketmq.remoting.protocol.body.AclInfo;
+import org.apache.rocketmq.remoting.protocol.body.LockBatchRequestBody;
+import org.apache.rocketmq.remoting.protocol.body.UnlockBatchRequestBody;
+import org.apache.rocketmq.remoting.protocol.body.UserInfo;
+import org.apache.rocketmq.remoting.protocol.header.CreateAclRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.CreateTopicRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.CreateUserRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.DeleteAclRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.DeleteTopicRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.DeleteUserRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetAclRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetAllTopicConfigResponseHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetEarliestMsgStoretimeRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetMaxOffsetRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetMinOffsetRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetTopicConfigRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.GetUserRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.ListAclsRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.ListUsersRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.ResumeCheckHalfMessageRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.SearchOffsetRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.UpdateAclRequestHeader;
+import org.apache.rocketmq.remoting.protocol.header.UpdateUserRequestHeader;
+import org.apache.rocketmq.remoting.protocol.heartbeat.ConsumeType;
+import org.apache.rocketmq.remoting.protocol.heartbeat.MessageModel;
+import org.apache.rocketmq.remoting.protocol.subscription.SubscriptionGroupConfig;
 import org.apache.rocketmq.store.DefaultMessageStore;
 import org.apache.rocketmq.store.MessageStore;
 import org.apache.rocketmq.store.SelectMappedBufferResult;
-import org.apache.rocketmq.store.config.BrokerRole;
 import org.apache.rocketmq.store.config.MessageStoreConfig;
 import org.apache.rocketmq.store.logfile.DefaultMappedFile;
 import org.apache.rocketmq.store.stats.BrokerStats;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -74,19 +112,16 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnitRunner;
 
-import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
-import java.util.Set;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.LongAdder;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -101,9 +136,8 @@ public class AdminBrokerProcessorTest {
     private Channel channel;
 
     @Spy
-    private BrokerController
-        brokerController = new BrokerController(new BrokerConfig(), new NettyServerConfig(), new NettyClientConfig(),
-            new MessageStoreConfig());
+    private BrokerController brokerController = new BrokerController(new BrokerConfig(), new NettyServerConfig(), new NettyClientConfig(),
+        new MessageStoreConfig(), null);
 
     @Mock
     private MessageStore messageStore;
@@ -112,7 +146,7 @@ public class AdminBrokerProcessorTest {
     private SendMessageProcessor sendMessageProcessor;
 
     @Mock
-    private ConcurrentMap<TopicQueueId, LongAdder> inFlyWritingCouterMap;
+    private ConcurrentMap<TopicQueueId, LongAdder> inFlyWritingCounterMap;
 
     private Set<String> systemTopicSet;
     private String topic;
@@ -131,10 +165,16 @@ public class AdminBrokerProcessorTest {
     private DefaultMessageStore defaultMessageStore;
     @Mock
     private ScheduleMessageService scheduleMessageService;
+    @Mock
+    private AuthenticationMetadataManager authenticationMetadataManager;
+    @Mock
+    private AuthorizationMetadataManager authorizationMetadataManager;
 
     @Before
     public void init() throws Exception {
         brokerController.setMessageStore(messageStore);
+        brokerController.setAuthenticationMetadataManager(authenticationMetadataManager);
+        brokerController.setAuthorizationMetadataManager(authorizationMetadataManager);
 
         //doReturn(sendMessageProcessor).when(brokerController).getSendMessageProcessor();
 
@@ -160,6 +200,40 @@ public class AdminBrokerProcessorTest {
         brokerController.getMessageStoreConfig().setTimerWheelEnable(false);
     }
 
+    @After
+    public void destroy() {
+        if (notToBeExecuted()) {
+            return;
+        }
+        if (brokerController.getSubscriptionGroupManager() != null) {
+            brokerController.getSubscriptionGroupManager().stop();
+        }
+        if (brokerController.getTopicConfigManager() != null) {
+            brokerController.getTopicConfigManager().stop();
+        }
+        if (brokerController.getConsumerOffsetManager() != null) {
+            brokerController.getConsumerOffsetManager().stop();
+        }
+    }
+
+    private void initRocksdbTopicManager() {
+        if (notToBeExecuted()) {
+            return;
+        }
+        RocksDBTopicConfigManager rocksDBTopicConfigManager = new RocksDBTopicConfigManager(brokerController);
+        brokerController.setTopicConfigManager(rocksDBTopicConfigManager);
+        rocksDBTopicConfigManager.load();
+    }
+
+    private void initRocksdbSubscriptionManager() {
+        if (notToBeExecuted()) {
+            return;
+        }
+        RocksDBSubscriptionGroupManager rocksDBSubscriptionGroupManager = new RocksDBSubscriptionGroupManager(brokerController);
+        brokerController.setSubscriptionGroupManager(rocksDBSubscriptionGroupManager);
+        rocksDBSubscriptionGroupManager.load();
+    }
+
     @Test
     public void testProcessRequest_success() throws RemotingCommandException, UnknownHostException {
         RemotingCommand request = createUpdateBrokerConfigCommand();
@@ -173,6 +247,15 @@ public class AdminBrokerProcessorTest {
         when(messageStore.selectOneMessageByOffset(any(Long.class))).thenReturn(createSelectMappedBufferResult());
         RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
         assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
+    }
+
+    @Test
+    public void testUpdateAndCreateTopicInRocksdb() throws Exception {
+        if (notToBeExecuted()) {
+            return;
+        }
+        initRocksdbTopicManager();
+        testUpdateAndCreateTopic();
     }
 
     @Test
@@ -195,24 +278,15 @@ public class AdminBrokerProcessorTest {
         request = buildCreateTopicRequest(topic);
         response = adminBrokerProcessor.processRequest(handlerContext, request);
         assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
-
     }
 
     @Test
-    public void testUpdateAndCreateTopicOnSlave() throws Exception {
-        // setup
-        MessageStoreConfig messageStoreConfig = mock(MessageStoreConfig.class);
-        when(messageStoreConfig.getBrokerRole()).thenReturn(BrokerRole.SLAVE);
-        defaultMessageStore = mock(DefaultMessageStore.class);
-        when(brokerController.getMessageStoreConfig()).thenReturn(messageStoreConfig);
-
-        // test on slave
-        String topic = "TEST_CREATE_TOPIC";
-        RemotingCommand request = buildCreateTopicRequest(topic);
-        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
-        assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
-        assertThat(response.getRemark()).isEqualTo("Can't modify topic or subscription group from slave broker, " +
-            "please execute it from master broker.");
+    public void testDeleteTopicInRocksdb() throws Exception {
+        if (notToBeExecuted()) {
+            return;
+        }
+        initRocksdbTopicManager();
+        testDeleteTopic();
     }
 
     @Test
@@ -232,19 +306,44 @@ public class AdminBrokerProcessorTest {
     }
 
     @Test
-    public void testDeleteTopicOnSlave() throws Exception {
-        // setup
-        MessageStoreConfig messageStoreConfig = mock(MessageStoreConfig.class);
-        when(messageStoreConfig.getBrokerRole()).thenReturn(BrokerRole.SLAVE);
-        defaultMessageStore = mock(DefaultMessageStore.class);
-        when(brokerController.getMessageStoreConfig()).thenReturn(messageStoreConfig);
+    public void testDeleteWithPopRetryTopic() throws Exception {
+        String topic = "topicA";
+        String anotherTopic = "another_topicA";
+        BrokerConfig brokerConfig = new BrokerConfig();
 
-        String topic = "TEST_DELETE_TOPIC";
+        topicConfigManager = mock(TopicConfigManager.class);
+        when(brokerController.getTopicConfigManager()).thenReturn(topicConfigManager);
+        final ConcurrentHashMap<String, TopicConfig> topicConfigTable = new ConcurrentHashMap<>();
+        topicConfigTable.put(topic, new TopicConfig());
+        topicConfigTable.put(KeyBuilder.buildPopRetryTopic(topic, "cid1", brokerConfig.isEnableRetryTopicV2()), new TopicConfig());
+
+        topicConfigTable.put(anotherTopic, new TopicConfig());
+        topicConfigTable.put(KeyBuilder.buildPopRetryTopic(anotherTopic, "cid2", brokerConfig.isEnableRetryTopicV2()), new TopicConfig());
+        when(topicConfigManager.getTopicConfigTable()).thenReturn(topicConfigTable);
+        when(topicConfigManager.selectTopicConfig(anyString())).thenAnswer(invocation -> {
+            final String selectTopic = invocation.getArgument(0);
+            return topicConfigManager.getTopicConfigTable().get(selectTopic);
+        });
+
+        when(brokerController.getConsumerOffsetManager()).thenReturn(consumerOffsetManager);
+        when(consumerOffsetManager.whichGroupByTopic(topic)).thenReturn(Sets.newHashSet("cid1"));
+
         RemotingCommand request = buildDeleteTopicRequest(topic);
         RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
-        assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
-        assertThat(response.getRemark()).isEqualTo("Can't modify topic or subscription group from slave broker, " +
-            "please execute it from master broker.");
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        verify(topicConfigManager).deleteTopicConfig(topic);
+        verify(topicConfigManager).deleteTopicConfig(KeyBuilder.buildPopRetryTopic(topic, "cid1", brokerConfig.isEnableRetryTopicV2()));
+        verify(messageStore, times(2)).deleteTopics(anySet());
+    }
+
+    @Test
+    public void testGetAllTopicConfigInRocksdb() throws Exception {
+        if (notToBeExecuted()) {
+            return;
+        }
+        initRocksdbTopicManager();
+        testGetAllTopicConfig();
     }
 
     @Test
@@ -278,9 +377,49 @@ public class AdminBrokerProcessorTest {
     }
 
     @Test
+    public void testProcessRequest_UpdateConfigPath() throws RemotingCommandException {
+        final RemotingCommand updateConfigRequest = RemotingCommand.createRequestCommand(RequestCode.UPDATE_BROKER_CONFIG, null);
+        Properties properties = new Properties();
+
+        ChannelHandlerContext ctx = mock(ChannelHandlerContext.class);
+        when(ctx.channel()).thenReturn(null);
+
+        // Update allowed value
+        properties.setProperty("allAckInSyncStateSet", "true");
+        updateConfigRequest.setBody(MixAll.properties2String(properties).getBytes(StandardCharsets.UTF_8));
+
+        RemotingCommand response = adminBrokerProcessor.processRequest(ctx, updateConfigRequest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        //update disallowed value
+        properties.clear();
+        properties.setProperty("brokerConfigPath", "test/path");
+        updateConfigRequest.setBody(MixAll.properties2String(properties).getBytes(StandardCharsets.UTF_8));
+
+        response = adminBrokerProcessor.processRequest(ctx, updateConfigRequest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getCode()).isEqualTo(ResponseCode.NO_PERMISSION);
+        assertThat(response.getRemark()).contains("Can not update config in black list.");
+
+        //update disallowed value
+        properties.clear();
+        properties.setProperty("configBlackList", "test;path");
+        updateConfigRequest.setBody(MixAll.properties2String(properties).getBytes(StandardCharsets.UTF_8));
+
+        response = adminBrokerProcessor.processRequest(ctx, updateConfigRequest);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getCode()).isEqualTo(ResponseCode.NO_PERMISSION);
+        assertThat(response.getRemark()).contains("Can not update config in black list.");
+    }
+
+    @Test
     public void testSearchOffsetByTimestamp() throws Exception {
         messageStore = mock(MessageStore.class);
-        when(messageStore.getOffsetInQueueByTime(anyString(), anyInt(), anyLong())).thenReturn(Long.MIN_VALUE);
+        when(messageStore.getOffsetInQueueByTime(anyString(), anyInt(), anyLong(), any(BoundaryType.class))).thenReturn(Long.MIN_VALUE);
         when(brokerController.getMessageStore()).thenReturn(messageStore);
         SearchOffsetRequestHeader searchOffsetRequestHeader = new SearchOffsetRequestHeader();
         searchOffsetRequestHeader.setTopic("topic");
@@ -369,6 +508,12 @@ public class AdminBrokerProcessorTest {
     }
 
     @Test
+    public void testUpdateAndCreateSubscriptionGroupInRocksdb() throws Exception {
+        initRocksdbSubscriptionManager();
+        testUpdateAndCreateSubscriptionGroup();
+    }
+
+    @Test
     public void testUpdateAndCreateSubscriptionGroup() throws RemotingCommandException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.UPDATE_AND_CREATE_SUBSCRIPTIONGROUP, null);
         SubscriptionGroupConfig subscriptionGroupConfig = new SubscriptionGroupConfig();
@@ -384,27 +529,9 @@ public class AdminBrokerProcessorTest {
     }
 
     @Test
-    public void testUpdateAndCreateSubscriptionGroupOnSlave() throws RemotingCommandException {
-        // Setup
-        MessageStoreConfig messageStoreConfig = mock(MessageStoreConfig.class);
-        when(messageStoreConfig.getBrokerRole()).thenReturn(BrokerRole.SLAVE);
-        defaultMessageStore = mock(DefaultMessageStore.class);
-        when(brokerController.getMessageStoreConfig()).thenReturn(messageStoreConfig);
-
-        // Test
-        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.UPDATE_AND_CREATE_SUBSCRIPTIONGROUP, null);
-        SubscriptionGroupConfig subscriptionGroupConfig = new SubscriptionGroupConfig();
-        subscriptionGroupConfig.setBrokerId(1);
-        subscriptionGroupConfig.setGroupName("groupId");
-        subscriptionGroupConfig.setConsumeEnable(Boolean.TRUE);
-        subscriptionGroupConfig.setConsumeBroadcastEnable(Boolean.TRUE);
-        subscriptionGroupConfig.setRetryMaxTimes(111);
-        subscriptionGroupConfig.setConsumeFromMinEnable(Boolean.TRUE);
-        request.setBody(JSON.toJSON(subscriptionGroupConfig).toString().getBytes());
-        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
-        assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
-        assertThat(response.getRemark()).isEqualTo("Can't modify topic or subscription group from slave broker, " +
-            "please execute it from master broker.");
+    public void testGetAllSubscriptionGroupInRocksdb() throws Exception {
+        initRocksdbSubscriptionManager();
+        testGetAllSubscriptionGroup();
     }
 
     @Test
@@ -415,30 +542,18 @@ public class AdminBrokerProcessorTest {
     }
 
     @Test
+    public void testDeleteSubscriptionGroupInRocksdb() throws Exception {
+        initRocksdbSubscriptionManager();
+        testDeleteSubscriptionGroup();
+    }
+
+    @Test
     public void testDeleteSubscriptionGroup() throws RemotingCommandException {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.DELETE_SUBSCRIPTIONGROUP, null);
         request.addExtField("groupName", "GID-Group-Name");
         request.addExtField("removeOffset", "true");
         RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
         assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
-    }
-
-    @Test
-    public void testDeleteSubscriptionGroupOnSlave() throws RemotingCommandException {
-        // Setup
-        MessageStoreConfig messageStoreConfig = mock(MessageStoreConfig.class);
-        when(messageStoreConfig.getBrokerRole()).thenReturn(BrokerRole.SLAVE);
-        defaultMessageStore = mock(DefaultMessageStore.class);
-        when(brokerController.getMessageStoreConfig()).thenReturn(messageStoreConfig);
-
-        // Test
-        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.DELETE_SUBSCRIPTIONGROUP, null);
-        request.addExtField("groupName", "GID-Group-Name");
-        request.addExtField("removeOffset", "true");
-        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
-        assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
-        assertThat(response.getRemark()).isEqualTo("Can't modify topic or subscription group from slave broker, " +
-            "please execute it from master broker.");
     }
 
     @Test
@@ -516,6 +631,15 @@ public class AdminBrokerProcessorTest {
     }
 
     @Test
+    public void testGetTopicConfigInRocksdb() throws Exception {
+        if (notToBeExecuted()) {
+            return;
+        }
+        initRocksdbTopicManager();
+        testGetTopicConfig();
+    }
+
+    @Test
     public void testGetTopicConfig() throws Exception {
         String topic = "foobar";
 
@@ -539,6 +663,234 @@ public class AdminBrokerProcessorTest {
             assertThat(response.getCode()).isEqualTo(ResponseCode.TOPIC_NOT_EXIST);
             assertThat(response.getRemark()).contains("No topic in this broker.");
         }
+    }
+
+    @Test
+    public void testCreateUser() throws RemotingCommandException {
+        when(authenticationMetadataManager.createUser(any(User.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+
+        CreateUserRequestHeader createUserRequestHeader = new CreateUserRequestHeader();
+        createUserRequestHeader.setUsername("abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_CREATE_USER, createUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        UserInfo userInfo = UserInfo.of("abc", "123", UserType.NORMAL.getName());
+        request.setBody(JSON.toJSONBytes(userInfo));
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        when(authenticationMetadataManager.isSuperUser(eq("rocketmq"))).thenReturn(CompletableFuture.completedFuture(true));
+        createUserRequestHeader = new CreateUserRequestHeader();
+        createUserRequestHeader.setUsername("super");
+        request = RemotingCommand.createRequestCommand(RequestCode.AUTH_CREATE_USER, createUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        userInfo = UserInfo.of("super", "123", UserType.SUPER.getName());
+        request.setBody(JSON.toJSONBytes(userInfo));
+        response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        when(authenticationMetadataManager.isSuperUser(eq("rocketmq"))).thenReturn(CompletableFuture.completedFuture(false));
+        response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
+    }
+
+    @Test
+    public void testUpdateUser() throws RemotingCommandException {
+        when(authenticationMetadataManager.updateUser(any(User.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+        when(authenticationMetadataManager.getUser(eq("abc"))).thenReturn(CompletableFuture.completedFuture(User.of("abc", "123", UserType.NORMAL)));
+        when(authenticationMetadataManager.getUser(eq("super"))).thenReturn(CompletableFuture.completedFuture(User.of("super", "123", UserType.SUPER)));
+
+        UpdateUserRequestHeader updateUserRequestHeader = new UpdateUserRequestHeader();
+        updateUserRequestHeader.setUsername("abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_UPDATE_USER, updateUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        UserInfo userInfo = UserInfo.of("abc", "123", UserType.NORMAL.getName());
+        request.setBody(JSON.toJSONBytes(userInfo));
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        when(authenticationMetadataManager.isSuperUser(eq("rocketmq"))).thenReturn(CompletableFuture.completedFuture(true));
+        updateUserRequestHeader = new UpdateUserRequestHeader();
+        updateUserRequestHeader.setUsername("super");
+        request = RemotingCommand.createRequestCommand(RequestCode.AUTH_UPDATE_USER, updateUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        userInfo = UserInfo.of("super", "123", UserType.SUPER.getName());
+        request.setBody(JSON.toJSONBytes(userInfo));
+        response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        when(authenticationMetadataManager.isSuperUser(eq("rocketmq"))).thenReturn(CompletableFuture.completedFuture(false));
+        response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SYSTEM_ERROR);
+    }
+
+    @Test
+    public void testDeleteUser() throws RemotingCommandException {
+        when(authenticationMetadataManager.deleteUser(any(String.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+        when(authenticationMetadataManager.getUser(eq("abc"))).thenReturn(CompletableFuture.completedFuture(User.of("abc", "123", UserType.NORMAL)));
+        when(authenticationMetadataManager.getUser(eq("super"))).thenReturn(CompletableFuture.completedFuture(User.of("super", "123", UserType.SUPER)));
+
+        DeleteUserRequestHeader deleteUserRequestHeader = new DeleteUserRequestHeader();
+        deleteUserRequestHeader.setUsername("abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_DELETE_USER, deleteUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        when(authenticationMetadataManager.isSuperUser(eq("rocketmq"))).thenReturn(CompletableFuture.completedFuture(true));
+        deleteUserRequestHeader = new DeleteUserRequestHeader();
+        deleteUserRequestHeader.setUsername("super");
+        request = RemotingCommand.createRequestCommand(RequestCode.AUTH_DELETE_USER, deleteUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+        when(authenticationMetadataManager.isSuperUser(eq("rocketmq"))).thenReturn(CompletableFuture.completedFuture(false));
+        response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.NO_PERMISSION);
+    }
+
+    @Test
+    public void testGetUser() throws RemotingCommandException {
+        when(authenticationMetadataManager.getUser(eq("abc"))).thenReturn(CompletableFuture.completedFuture(User.of("abc", "123", UserType.NORMAL)));
+
+        GetUserRequestHeader getUserRequestHeader = new GetUserRequestHeader();
+        getUserRequestHeader.setUsername("abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_GET_USER, getUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+        UserInfo userInfo = JSON.parseObject(new String(response.getBody()), UserInfo.class);
+        assertThat(userInfo.getUsername()).isEqualTo("abc");
+        assertThat(userInfo.getPassword()).isEqualTo("123");
+        assertThat(userInfo.getUserType()).isEqualTo("Normal");
+    }
+
+    @Test
+    public void testListUser() throws RemotingCommandException {
+        when(authenticationMetadataManager.listUser(eq("abc"))).thenReturn(CompletableFuture.completedFuture(Arrays.asList(User.of("abc", "123", UserType.NORMAL))));
+
+        ListUsersRequestHeader listUserRequestHeader = new ListUsersRequestHeader();
+        listUserRequestHeader.setFilter("abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_LIST_USER, listUserRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+        List<UserInfo> userInfo = JSON.parseArray(new String(response.getBody()), UserInfo.class);
+        assertThat(userInfo.get(0).getUsername()).isEqualTo("abc");
+        assertThat(userInfo.get(0).getPassword()).isEqualTo("123");
+        assertThat(userInfo.get(0).getUserType()).isEqualTo("Normal");
+    }
+
+    @Test
+    public void testCreateAcl() throws RemotingCommandException {
+        when(authorizationMetadataManager.createAcl(any(Acl.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+
+        CreateAclRequestHeader createAclRequestHeader = new CreateAclRequestHeader();
+        createAclRequestHeader.setSubject("User:abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_CREATE_ACL, createAclRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        AclInfo aclInfo = AclInfo.of("User:abc", Arrays.asList("Topic:*"), Arrays.asList("PUB"), Arrays.asList("192.168.0.1"), "Grant");
+        request.setBody(JSON.toJSONBytes(aclInfo));
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+    }
+
+    @Test
+    public void testUpdateAcl() throws RemotingCommandException {
+        when(authorizationMetadataManager.updateAcl(any(Acl.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+
+        UpdateAclRequestHeader updateAclRequestHeader = new UpdateAclRequestHeader();
+        updateAclRequestHeader.setSubject("User:abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_UPDATE_ACL, updateAclRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        AclInfo aclInfo = AclInfo.of("User:abc", Arrays.asList("Topic:*"), Arrays.asList("PUB"), Arrays.asList("192.168.0.1"), "Grant");
+        request.setBody(JSON.toJSONBytes(aclInfo));
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+
+    }
+
+    @Test
+    public void testDeleteAcl() throws RemotingCommandException {
+        when(authorizationMetadataManager.deleteAcl(any(), any(), any()))
+            .thenReturn(CompletableFuture.completedFuture(null));
+
+        DeleteAclRequestHeader deleteAclRequestHeader = new DeleteAclRequestHeader();
+        deleteAclRequestHeader.setSubject("User:abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_DELETE_ACL, deleteAclRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+    }
+
+    @Test
+    public void testGetAcl() throws RemotingCommandException {
+        Acl aclInfo = Acl.of(User.of("abc"), Arrays.asList(Resource.of("Topic:*")), Arrays.asList(Action.PUB), Environment.of("192.168.0.1"), Decision.ALLOW);
+        when(authorizationMetadataManager.getAcl(any(Subject.class))).thenReturn(CompletableFuture.completedFuture(aclInfo));
+
+        GetAclRequestHeader getAclRequestHeader = new GetAclRequestHeader();
+        getAclRequestHeader.setSubject("User:abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_GET_ACL, getAclRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+        AclInfo aclInfoData = JSON.parseObject(new String(response.getBody()), AclInfo.class);
+        assertThat(aclInfoData.getSubject()).isEqualTo("User:abc");
+        assertThat(aclInfoData.getPolicies().get(0).getEntries().get(0).getResource()).isEqualTo("Topic:*");
+        assertThat(aclInfoData.getPolicies().get(0).getEntries().get(0).getActions()).containsAll(Arrays.asList(Action.PUB.getName()));
+        assertThat(aclInfoData.getPolicies().get(0).getEntries().get(0).getSourceIps()).containsAll(Arrays.asList("192.168.0.1"));
+        assertThat(aclInfoData.getPolicies().get(0).getEntries().get(0).getDecision()).isEqualTo("Allow");
+    }
+
+    @Test
+    public void testListAcl() throws RemotingCommandException {
+        Acl aclInfo = Acl.of(User.of("abc"), Arrays.asList(Resource.of("Topic:*")), Arrays.asList(Action.PUB), Environment.of("192.168.0.1"), Decision.ALLOW);
+        when(authorizationMetadataManager.listAcl(any(), any())).thenReturn(CompletableFuture.completedFuture(Arrays.asList(aclInfo)));
+
+        ListAclsRequestHeader listAclRequestHeader = new ListAclsRequestHeader();
+        listAclRequestHeader.setSubjectFilter("User:abc");
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.AUTH_LIST_ACL, listAclRequestHeader);
+        request.setVersion(441);
+        request.addExtField("AccessKey", "rocketmq");
+        request.makeCustomHeaderToNet();
+        RemotingCommand response = adminBrokerProcessor.processRequest(handlerContext, request);
+        assertThat(response.getCode()).isEqualTo(ResponseCode.SUCCESS);
+        List<AclInfo> aclInfoData = JSON.parseArray(new String(response.getBody()), AclInfo.class);
+        assertThat(aclInfoData.get(0).getSubject()).isEqualTo("User:abc");
+        assertThat(aclInfoData.get(0).getPolicies().get(0).getEntries().get(0).getResource()).isEqualTo("Topic:*");
+        assertThat(aclInfoData.get(0).getPolicies().get(0).getEntries().get(0).getActions()).containsAll(Arrays.asList(Action.PUB.getName()));
+        assertThat(aclInfoData.get(0).getPolicies().get(0).getEntries().get(0).getSourceIps()).containsAll(Arrays.asList("192.168.0.1"));
+        assertThat(aclInfoData.get(0).getPolicies().get(0).getEntries().get(0).getDecision()).isEqualTo("Allow");
     }
 
     private RemotingCommand buildCreateTopicRequest(String topic) {
@@ -582,6 +934,7 @@ public class AdminBrokerProcessorTest {
 
     private ResumeCheckHalfMessageRequestHeader createResumeCheckHalfMessageRequestHeader() {
         ResumeCheckHalfMessageRequestHeader header = new ResumeCheckHalfMessageRequestHeader();
+        header.setTopic("topic");
         header.setMsgId("C0A803CA00002A9F0000000000031367");
         return header;
     }
@@ -597,5 +950,9 @@ public class AdminBrokerProcessorTest {
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.UPDATE_BROKER_CONFIG, null);
         request.makeCustomHeaderToNet();
         return request;
+    }
+
+    private boolean notToBeExecuted() {
+        return MixAll.isMac();
     }
 }
